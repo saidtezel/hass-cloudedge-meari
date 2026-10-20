@@ -1,8 +1,10 @@
-"""Sensor platform for CloudEdge / Meari — battery, environment, baby status."""
+"""Sensor platform for CloudEdge / Meari — battery, environment, baby status, PTZ."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -18,7 +20,19 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from .coordinator import CloudEdgeMeariCoordinator
 from .runtime import add_camera_entities
 from .entity import CloudEdgeMeariEntity, CloudEdgeMeariIotNumericEntity
-from .meari_commands import BABY_STATUS, HUMIDITY, TEMPERATURE, WIFI_STRENGTH
+from .coordinator.iot import is_area_value
+from .meari_commands import (
+    BABY_STATUS,
+    DETECTION_AREAS,
+    HUMIDITY,
+    PTZ_INFO,
+    TEMPERATURE,
+    WIFI_STRENGTH,
+)
+
+# Only PTZ Position polls (the rest are pushed by the coordinator): the camera
+# is asked for its live position this often.
+SCAN_INTERVAL = timedelta(seconds=30)
 
 # (min percent, icon) ladders, highest threshold first.
 _CHARGING_BATTERY_ICONS = (
@@ -136,7 +150,92 @@ def _camera_entities(
     )
     if coord.has_iot_code(BABY_STATUS):
         entities.append(CloudEdgeMeariBabyStatusSensor(coord, entry))
+    if coord.has_ptz:
+        entities.append(CloudEdgeMeariPtzPositionSensor(coord, entry))
+    if any(is_area_value(coord.get_iot_value(code)) for code in DETECTION_AREAS.values()):
+        entities.append(CloudEdgeMeariDetectionAreasSensor(coord, entry))
     return entities
+
+
+def _parse_json(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except ValueError:
+            pass
+    return value
+
+
+class CloudEdgeMeariPtzPositionSensor(CloudEdgeMeariEntity, SensorEntity):
+    """Where the camera is pointing, as the camera reports it (IoT 1034).
+
+    The value is shown as reported; a JSON object's fields are also
+    attributes, for automations. Polled live from the camera, except on a
+    battery camera that is asleep (asking would wake it).
+    """
+
+    _attr_name = "PTZ Position"
+    _attr_icon = "mdi:axis-arrow"
+    _attr_should_poll = True
+
+    def __init__(
+        self, coordinator: CloudEdgeMeariCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.device_uuid}_ptz_position"
+
+    async def async_update(self) -> None:
+        coord = self._coordinator
+        if coord.is_battery_camera and not coord.camera_awake:
+            return
+        await self.hass.async_add_executor_job(coord.refresh_ptz_position)
+
+    @property
+    def native_value(self) -> str | None:
+        value = self._coordinator.get_iot_value(PTZ_INFO)
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            value = json.dumps(value, separators=(",", ":"))
+        return value[:255]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        parsed = _parse_json(self._coordinator.get_iot_value(PTZ_INFO))
+        return dict(parsed) if isinstance(parsed, dict) else {}
+
+
+class CloudEdgeMeariDetectionAreasSensor(CloudEdgeMeariEntity, SensorEntity):
+    """The camera's detection areas (IoT 177/232/247/303), read-only.
+
+    State is how many area codes the camera reports; each one's value is an
+    attribute, in the shape cloudplus.set_detection_area writes back.
+    """
+
+    _attr_name = "Detection Areas"
+    _attr_icon = "mdi:vector-polygon"
+
+    def __init__(
+        self, coordinator: CloudEdgeMeariCoordinator, entry: ConfigEntry
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{coordinator.device_uuid}_detection_areas"
+
+    def _areas(self) -> dict[str, Any]:
+        areas = {}
+        for name, code in DETECTION_AREAS.items():
+            value = self._coordinator.get_iot_value(code)
+            if is_area_value(value):
+                areas[name] = _parse_json(value)
+        return areas
+
+    @property
+    def native_value(self) -> int:
+        return len(self._areas())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self._areas()
 
 
 _BABY_STATES = {0: "awake", 1: "crying", 2: "sleeping"}

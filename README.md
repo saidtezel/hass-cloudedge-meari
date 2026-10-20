@@ -185,11 +185,16 @@ setup and exposes only those that exist. Expect a subset of:
   Update, OSD Watermark, Brand Logo, Sound, Lamp.
 - **Numbers** (sliders): Motion / Sound / Human / PIR Sensitivity, PIR
   Interval, Floodlight Brightness & Duration, Speaker Volume, Warm Light
-  Brightness.
+  Brightness, Watch Position (the PTZ preset the camera returns to after
+  tracking or patrol; only on cameras that report it).
 - **Selects**: SD Record Type, Day/Night Mode, Alarm Frequency,
   Sound/Light Alarm Type, Anti-Flicker (50/60 Hz), Full Color Mode.
 - **Sensors**: Temperature, Humidity, Baby Status (awake / crying /
-  sleeping; polled every few minutes).
+  sleeping; polled every few minutes), PTZ Position (where a PTZ camera is
+  pointing, as it reports it; asked every 30 s, or on demand with
+  `homeassistant.update_entity`; JSON fields are also attributes),
+  Detection Areas (the camera's alarm / AI detection zones as attributes,
+  read-only).
 - **Baby monitors** (e.g. Arenti AINanny):
   - **Lullaby** `media_player` — play / pause / stop / next / previous,
     volume and repeat for the built-in lullabies and white noise. A track
@@ -207,6 +212,7 @@ Cameras that don't expose a feature simply won't show its entity.
 |------------------|-------------|
 | `cloudplus.ptz`  | Move (`left`/`right`/`up`/`down`) or stop a PTZ camera. Target a `camera` entity. See [services.yaml](custom_components/cloudplus/services.yaml). |
 | `cloudplus.ptz_preset` | `goto`, `save` (the current position) or `delete` preset slot `preset` (1–32) on a PTZ camera. |
+| `cloudplus.set_detection_area` | Write one detection area (`roi`, `polygon_roi`, `smart_polygon_roi`, `smart_front_polygon_roi`). Copy its current `value` from the Detection Areas sensor attributes and edit it; only areas the camera already reports are written. |
 
 ### PTZ from a dashboard (press and hold)
 

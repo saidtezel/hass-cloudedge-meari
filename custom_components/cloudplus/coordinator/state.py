@@ -25,8 +25,14 @@ from ..p2p_streamer import (
     quality_profile_labels,
     supports_adaptive_stream,
 )
-from ..meari_commands import PTZ_PRESET
-from .iot import capability_value, iot_value, normalize_iot_values, supports_feature
+from ..meari_commands import PTZ_INFO, PTZ_PRESET
+from .iot import (
+    capability_value,
+    iot_value,
+    is_area_value,
+    normalize_iot_values,
+    supports_feature,
+)
 from .stream_server import ANY_BIND_HOST, LOCAL_BIND_HOST
 
 _LOGGER = logging.getLogger(__name__)
@@ -346,6 +352,35 @@ class CoordinatorStateMixin:
         """Go to / save / delete a preset (IoT 848; act is goto, set or del)."""
         value = json.dumps({"id": preset, "name": name, "act": act}, separators=(",", ":"))
         return self.send_device_command(PTZ_PRESET, value)
+
+    def refresh_ptz_position(self) -> None:
+        """Ask the camera itself (not the server cache) for IoT 1034 (blocking)."""
+        api = self._api
+        if api is None or not api.openapi_server:
+            return
+        try:
+            info = api.get_device_iot_values(self._sn_num, (str(PTZ_INFO),))
+        except (OSError, RuntimeError, ValueError, KeyError) as exc:
+            _LOGGER.debug("PTZ position fetch failed for %s: %s", self._sn_num, exc)
+            return
+        if self._apply_iot_values(info):
+            self._fire_update()
+
+    def set_detection_area(self, code: int, value: Any) -> bool:
+        """Write a detection-area code in the shape the camera reports it in.
+
+        Only codes the camera already reports as an area (a JSON list/object,
+        or a string holding one) are written: several area codes share their
+        number with unrelated settings on other models (232, 247).
+        """
+        current = self.get_iot_value(code)
+        if not is_area_value(current):
+            return False
+        if isinstance(current, str) and not isinstance(value, str):
+            value = json.dumps(value, separators=(",", ":"))
+        elif not isinstance(current, str) and isinstance(value, str):
+            value = json.loads(value)
+        return self.set_iot_value(code, value)
 
     def wake_camera(self) -> None:
         self._wake_event.set()

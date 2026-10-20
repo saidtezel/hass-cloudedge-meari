@@ -37,7 +37,7 @@ def load_platforms() -> dict[str, ModuleType]:
         },
         "homeassistant.components.number": {
             "NumberEntity": type("NumberEntity", (), {}),
-            "NumberMode": SimpleNamespace(SLIDER="slider"),
+            "NumberMode": SimpleNamespace(SLIDER="slider", BOX="box"),
         },
         "homeassistant.components.select": {
             "SelectEntity": type("SelectEntity", (), {}),
@@ -67,6 +67,7 @@ def coordinator(caps: dict | None = None, values: dict | None = None) -> Any:
     coord._device_name = "Synthetic camera"
     coord._device_category = "ipc"
     coord._is_snap = False
+    coord._has_ptz = False
     coord._available = True
     return coord
 
@@ -256,3 +257,76 @@ class NumberTests(unittest.IsolatedAsyncioTestCase):
             if isinstance(entity, NUMBER.CloudEdgeMeariIotNumber)
         ]
         self.assertEqual(iot_numbers, [])
+
+
+class PtzBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    """Building blocks for limiting human tracking: position, watch slot, areas."""
+
+    async def entities(self, platform: ModuleType, coord: Any) -> list:
+        entry = SimpleNamespace(entry_id="test")
+        add_entities = Mock()
+        await platform.async_setup_entry(account_hass(entry, coord), entry, add_entities)
+        return add_entities.call_args.args[0]
+
+    async def test_watch_position_needs_ptz_and_the_code(self):
+        for caps, values, expected in (
+            ({"ptz2": 1}, {278: 1}, True),
+            ({"ptz2": 1}, {}, False),
+            ({}, {278: 1}, False),
+        ):
+            with self.subTest(caps=caps, values=values):
+                entities = await self.entities(NUMBER, coordinator(caps, values))
+                codes = {e._spec.code for e in entities if isinstance(e, NUMBER.CloudEdgeMeariIotNumber)}
+                self.assertEqual(278 in codes, expected)
+
+    async def test_ptz_position_reports_raw_value_and_fields(self):
+        coord = coordinator({}, {1034: '{"x":120,"y":-15}'})
+        self.assertFalse(any(isinstance(e, SENSOR.CloudEdgeMeariPtzPositionSensor)
+                             for e in await self.entities(SENSOR, coord)))
+        coord._has_ptz = True
+        sensor = next(e for e in await self.entities(SENSOR, coord)
+                      if isinstance(e, SENSOR.CloudEdgeMeariPtzPositionSensor))
+        self.assertEqual(sensor.native_value, '{"x":120,"y":-15}')
+        self.assertEqual(sensor.extra_state_attributes, {"x": 120, "y": -15})
+        coord._iot_data = {1034: {"x": 3, "y": 4}}
+        self.assertEqual(sensor.native_value, '{"x":3,"y":4}')
+        self.assertEqual(sensor.extra_state_attributes, {"x": 3, "y": 4})
+        coord._iot_data = {}
+        self.assertIsNone(sensor.native_value)
+        self.assertEqual(sensor.extra_state_attributes, {})
+
+    async def test_asleep_battery_camera_is_not_polled(self):
+        coord = coordinator({}, {})
+        coord._has_ptz = True
+        coord._is_snap = True
+        coord._camera_awake = False
+        sensor = SENSOR.CloudEdgeMeariPtzPositionSensor(coord, SimpleNamespace())
+        sensor.hass = SimpleNamespace(async_add_executor_job=AsyncMock())
+        await sensor.async_update()
+        sensor.hass.async_add_executor_job.assert_not_awaited()
+        coord._camera_awake = True
+        await sensor.async_update()
+        sensor.hass.async_add_executor_job.assert_awaited_once_with(coord.refresh_ptz_position)
+
+    async def test_detection_areas_skip_reused_codes(self):
+        # 247 is also Shot Resolution (an int) on hunting cameras.
+        coord = coordinator({}, {247: 0, 232: '[{"x":0,"y":0},{"x":50,"y":0},{"x":50,"y":50}]'})
+        sensor = next(e for e in await self.entities(SENSOR, coord)
+                      if isinstance(e, SENSOR.CloudEdgeMeariDetectionAreasSensor))
+        self.assertEqual(sensor.native_value, 1)
+        self.assertEqual(sensor.extra_state_attributes,
+                         {"polygon_roi": [{"x": 0, "y": 0}, {"x": 50, "y": 0}, {"x": 50, "y": 50}]})
+        self.assertFalse(any(isinstance(e, SENSOR.CloudEdgeMeariDetectionAreasSensor)
+                             for e in await self.entities(SENSOR, coordinator({}, {247: 0}))))
+
+    def test_set_detection_area_keeps_the_reported_shape(self):
+        coord = coordinator({}, {232: "[]", 177: [{"x": 0}], 247: 0})
+        coord.set_iot_value = Mock(return_value=True)
+        self.assertTrue(coord.set_detection_area(232, [{"x": 1, "y": 2}]))
+        coord.set_iot_value.assert_called_with(232, '[{"x":1,"y":2}]')
+        self.assertTrue(coord.set_detection_area(177, '[{"x":5}]'))
+        coord.set_iot_value.assert_called_with(177, [{"x": 5}])
+        coord.set_iot_value.reset_mock()
+        self.assertFalse(coord.set_detection_area(247, [{"x": 1}]))
+        self.assertFalse(coord.set_detection_area(303, [{"x": 1}]))
+        coord.set_iot_value.assert_not_called()

@@ -234,6 +234,15 @@ SMART_DET_FRONT_SENSITIVITY = 301  # (Int) 1-5
 SMART_DET_FRONT_DEPLOYMENT_TIME = 302  # (JSON) Front schedule
 SMART_FRONT_POLYGON_ROI = 303  # (JSON) Front polygon area
 
+# Detection-area codes by the name the Detection Areas sensor attributes and
+# the cloudplus.set_detection_area action use.
+DETECTION_AREAS = {
+    "roi": ROI,
+    "polygon_roi": POLYGON_ROI,
+    "smart_polygon_roi": SMART_POLYGON_ROI,
+    "smart_front_polygon_roi": SMART_FRONT_POLYGON_ROI,
+}
+
 RESET_DEVICE = 800  # (Action) Soft reset
 RESET_DEVICE_1 = 801  # (Action) Hard reset
 SYNC_TIME = 802  # (Action) Sync time with phone

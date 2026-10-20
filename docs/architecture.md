@@ -32,7 +32,7 @@ root if present.
 
 | File | Responsibility |
 |------|----------------|
-| `__init__.py` | `async_setup` (runs the legacy-entry migration, registers the PTZ service), `async_setup_entry` / `async_unload_entry` for an account: login, camera discovery (new cameras become subentries; `known_cameras` keeps deleted ones deleted), one coordinator per camera subentry. Coordinators start before the platforms (go2rtc needs a `stream_source` when the camera is added); cloud errors raise `ConfigEntryNotReady`. An update listener reloads only when cameras are added/removed or a video password changes. |
+| `__init__.py` | `async_setup` (runs the legacy-entry migration, registers the PTZ and detection-area actions), `async_setup_entry` / `async_unload_entry` for an account: login, camera discovery (new cameras become subentries; `known_cameras` keeps deleted ones deleted), one coordinator per camera subentry. Coordinators start before the platforms (go2rtc needs a `stream_source` when the camera is added); cloud errors raise `ConfigEntryNotReady`. An update listener reloads only when cameras are added/removed or a video password changes. |
 | `config_flow.py` | Account config flow + options flow (credentials), and `CameraSubentryFlow`: **Add camera** (lists account cameras not yet added) and **Reconfigure** (E2EE video password). |
 | `migration.py` | Folds legacy per-camera entries (config VERSION ≤ 2) into `camera` subentries of their account, moving devices/entities so entity ids and history survive. Orphaned camera entries become the account entry. |
 | `ptz.py` | `PtzController`: orders one camera's `cloudplus.ptz` move/stop commands, stops a move after its `duration` or after 20 s if the release never arrives. 807/808 vs 841/842 is picked from the `ptz`/`ptz2` capabilities in `coordinator/state.py`. |
@@ -52,10 +52,10 @@ derived from the camera's IoT model:
 | `camera.py` | Live + idle MPEG-TS stream (`http://`), served to the browser by HA's built-in go2rtc (WebRTC) or HLS. Enabled for battery and mains-powered cameras. | — |
 | `binary_sensor.py` | Motion / Awake / Charging. | Crying (cry alerts, `cry_det`). |
 | `button.py` | Wake Camera. | — |
-| `sensor.py` | Battery + Charge Status. | Temperature, Humidity, WiFi Signal, Baby Status (863). |
+| `sensor.py` | Battery + Charge Status. | Temperature, Humidity, WiFi Signal, Baby Status (863), PTZ Position (1034, polled live from the camera every 30 s), Detection Areas (177/232/247/303, read-only; written by `cloudplus.set_detection_area`). |
 | `light.py` | — | Night Light: RGB on/off + colour (197/198, state 1014), when `rgb_light` or 197 is reported. |
 | `media_player.py` | — | Lullaby: play/pause/stop/skip (821, a device action), volume (179), repeat (277); state 1012. Only when music codes are reported. |
-| `number.py` | Motion Timeout. | Sensitivities, intervals, brightness, volume… |
+| `number.py` | Motion Timeout. | Sensitivities, intervals, brightness, volume, Watch Position (278)… |
 | `select.py` | Stream Host Mode (Local Only / IP / Docker), Stream Quality. | Day/Night, SD record, anti-flicker… |
 | `switch.py` | Wake on Motion. | LED, PIR, ONVIF, HomeKit, sirens… |
 

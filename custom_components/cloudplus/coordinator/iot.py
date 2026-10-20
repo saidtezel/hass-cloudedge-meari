@@ -65,6 +65,16 @@ def iot_value(values: Mapping[int | str, Any], code: int | str) -> Any:
     return value
 
 
+def is_area_value(value: Any) -> bool:
+    """Return whether *value* looks like a detection-area setting (JSON shape)."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return False
+    return isinstance(value, (list, dict))
+
+
 def supports_feature(
     caps: Mapping[str, Any],
     device: Mapping[str, Any],

@@ -1,4 +1,4 @@
-"""Number platform for CloudEdge / Meari — motion timeout."""
+"""Number platform for CloudEdge / Meari — motion timeout, IoT settings."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from .meari_commands import (
     SOUND_DET_SENSITIVITY,
     SPEAK_VOLUME,
     WARM_LIGHT_BRI,
+    WATCH_SLOT,
 )
 
 
@@ -48,6 +49,10 @@ class IotNumberSpec:
     # Required for codes the vendor reuses for unrelated settings, where
     # writing the wrong meaning would corrupt an unrelated device setting.
     require_feature: bool = False
+    # When set, also require the code in the camera's IoT values: for
+    # settings only some cameras with the feature have.
+    require_code: bool = False
+    mode: NumberMode = NumberMode.SLIDER
 
 
 IOT_NUMBERS: tuple[IotNumberSpec, ...] = (
@@ -135,6 +140,19 @@ IOT_NUMBERS: tuple[IotNumberSpec, ...] = (
         icon="mdi:brightness-6",
         unit=PERCENTAGE,
     ),
+    # The preset slot the camera returns to after human tracking or patrol
+    # (the app's "watch position"); the vendor table gives slots 1-6.
+    IotNumberSpec(
+        "ptz",
+        WATCH_SLOT,
+        "Watch Position",
+        0,
+        32,
+        icon="mdi:home-map-marker",
+        require_feature=True,
+        require_code=True,
+        mode=NumberMode.BOX,
+    ),
 )
 
 
@@ -154,16 +172,17 @@ def _camera_entities(
     entities.extend(
         CloudEdgeMeariIotNumber(coord, entry, spec)
         for spec in IOT_NUMBERS
-        if coord.supports_iot(spec.feature)
-        or (not spec.require_feature and coord.has_iot_code(spec.code))
+        if (
+            coord.supports_iot(spec.feature)
+            or (not spec.require_feature and coord.has_iot_code(spec.code))
+        )
+        and (not spec.require_code or coord.has_iot_code(spec.code))
     )
     return entities
 
 
 class CloudEdgeMeariIotNumber(CloudEdgeMeariIotNumericEntity, NumberEntity):
     """Number entity backed by a Meari IoT value."""
-
-    _attr_mode = NumberMode.SLIDER
 
     def __init__(
         self,
@@ -172,6 +191,7 @@ class CloudEdgeMeariIotNumber(CloudEdgeMeariIotNumericEntity, NumberEntity):
         spec: IotNumberSpec,
     ) -> None:
         super().__init__(coordinator, entry, spec)
+        self._attr_mode = spec.mode
         self._attr_native_min_value = spec.min_value
         self._attr_native_max_value = spec.max_value
         self._attr_native_step = spec.step

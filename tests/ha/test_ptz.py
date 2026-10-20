@@ -110,3 +110,28 @@ async def test_new_move_replaces_pending_auto_stop(hass: HomeAssistant, commands
     assert commands == ["move:left", "move:right"]  # the nudge's stop was dropped
     await ptz(hass, entity_id, action="stop")
     assert commands[-1] == "stop"
+
+
+async def test_set_detection_area_writes_through_and_rejects_unreported(hass: HomeAssistant):
+    from homeassistant.exceptions import HomeAssistantError
+    from custom_components.cloudplus.runtime import all_coordinators
+
+    entity_id = await camera_entity(hass)
+    (coord,) = all_coordinators(hass)
+    coord._iot_data[232] = "[]"
+    with patch(f"{COORDINATOR}.set_iot_value", return_value=True) as set_iot_value:
+        await hass.services.async_call(
+            DOMAIN,
+            "set_detection_area",
+            {"entity_id": entity_id, "area": "polygon_roi", "value": [{"x": 1, "y": 2}]},
+            blocking=True,
+        )
+        set_iot_value.assert_called_once_with(232, '[{"x":1,"y":2}]')
+        with pytest.raises(HomeAssistantError):
+            await hass.services.async_call(
+                DOMAIN,
+                "set_detection_area",
+                {"entity_id": entity_id, "area": "smart_polygon_roi", "value": []},
+                blocking=True,
+            )
+        assert set_iot_value.call_count == 1
