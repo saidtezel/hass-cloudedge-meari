@@ -15,7 +15,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -47,6 +47,7 @@ from .migration import (
     is_legacy_camera_entry,
 )
 from .ptz import PTZ_MAX_MOVE_S, PtzController
+from .meari_commands import DETECTION_AREAS
 from .runtime import (
     AccountRuntime,
     account_runtime,
@@ -82,6 +83,14 @@ SERVICE_PTZ_PRESET_SCHEMA = vol.Schema(
     },
     extra=vol.ALLOW_EXTRA,
 )
+SERVICE_SET_DETECTION_AREA = "set_detection_area"
+SERVICE_SET_DETECTION_AREA_SCHEMA = vol.Schema(
+    {
+        vol.Required("area"): vol.In(list(DETECTION_AREAS)),
+        vol.Required("value"): vol.Any(list, dict, str),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
 SERVICE_PTZ_SCHEMA = vol.Schema(
     {
         vol.Required("action"): vol.In(["move", "stop"]),
@@ -101,7 +110,7 @@ async def async_setup(hass: HomeAssistant, config: Any) -> bool:
     del config
     hass.data.setdefault(DOMAIN, {})
     await async_migrate_legacy_entries(hass)
-    _register_ptz_service(hass)
+    _register_services(hass)
     return True
 
 
@@ -298,12 +307,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# PTZ service
+# Services
 # ---------------------------------------------------------------------------
 
 
 @callback
-def _register_ptz_service(hass: HomeAssistant) -> None:
+def _register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_PTZ):
         return
 
@@ -351,9 +360,36 @@ def _register_ptz_service(hass: HomeAssistant) -> None:
                 PTZ_PRESET_ACTS[call.data["action"]], preset, name
             )
 
+    async def _handle_set_detection_area(call: ServiceCall) -> None:
+        area = call.data["area"]
+        entity_ids = call.data.get("entity_id", [])
+        if isinstance(entity_ids, str):
+            entity_ids = [entity_ids]
+        for eid in entity_ids:
+            c = _find_coordinator(eid)
+            if c is None:
+                raise HomeAssistantError(f"{eid} is not a CloudEdge / Meari camera")
+            try:
+                ok = await hass.async_add_executor_job(
+                    c.set_detection_area, DETECTION_AREAS[area], call.data["value"]
+                )
+            except ValueError as exc:
+                raise HomeAssistantError(f"{area} value is not valid JSON") from exc
+            if not ok:
+                raise HomeAssistantError(
+                    f"{c.device_name} did not accept {area}; it is only written when"
+                    " the camera already reports that area (see Detection Areas)"
+                )
+
     hass.services.async_register(
         DOMAIN, SERVICE_PTZ, _handle_ptz, schema=SERVICE_PTZ_SCHEMA
     )
     hass.services.async_register(
         DOMAIN, SERVICE_PTZ_PRESET, _handle_ptz_preset, schema=SERVICE_PTZ_PRESET_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_DETECTION_AREA,
+        _handle_set_detection_area,
+        schema=SERVICE_SET_DETECTION_AREA_SCHEMA,
     )

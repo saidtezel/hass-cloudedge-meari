@@ -79,3 +79,37 @@ ptz_preset:
       description: Label stored with the preset when saving (defaults to "Preset N").
       selector:
         text:
+
+set_detection_area:
+  name: Set Detection Area
+  description: >-
+    Write one of the camera's detection areas. Copy the area's current value
+    from the camera's Detection Areas sensor attributes and edit it; the value
+    is written in the same shape. Only areas the camera already reports can
+    be written.
+  target:
+    entity:
+      integration: cloudplus
+      domain: camera
+  fields:
+    area:
+      name: Area
+      description: Which detection area to write.
+      required: true
+      selector:
+        select:
+          options:
+            - label: Alarm area (rectangles)
+              value: roi
+            - label: Polygon area
+              value: polygon_roi
+            - label: AI detection polygon
+              value: smart_polygon_roi
+            - label: Front camera AI polygon
+              value: smart_front_polygon_roi
+    value:
+      name: Value
+      description: The new area, in the format the Detection Areas sensor shows.
+      required: true
+      selector:
+        object:
